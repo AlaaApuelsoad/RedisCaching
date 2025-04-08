@@ -9,9 +9,19 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.IntStream;
@@ -23,6 +33,7 @@ public class EmployeeService {
     private final EmployeeRepository employeeRepository;
 
     private final Faker faker;
+    private final JdbcTemplate jdbcTemplate;
 
     @Autowired
     private CacheManager cacheManager;
@@ -35,7 +46,7 @@ public class EmployeeService {
     @Transactional(rollbackFor = Exception.class)
     public void generateFakeEmployee() {
 
-        List<Employee> employees = IntStream.range(0,5000)
+        List<Employee> employees = IntStream.range(0,500000)
                 .mapToObj(i -> new Employee(
                         faker.name().firstName(),
                         faker.name().lastName()
@@ -112,4 +123,64 @@ public class EmployeeService {
         }
         return "Employee deleted";
     }
+
+
+    public ResponseEntity<InputStreamResource> exportToCSV(){
+        List<Employee> employees = employeeRepository.findAll();
+        final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (PrintWriter writer = new PrintWriter(outputStream)){
+            writer.print("ID,Name,Surname");
+
+            for (Employee employee : employees){
+                writer.printf("%d,%s,%s%n", employee.getId(), employee.getName(), employee.getSurname());
+            }
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("Content-Disposition","attachment; filename=employees.csv");
+
+        return ResponseEntity.ok()
+                .headers(headers).
+                body(new InputStreamResource(new ByteArrayInputStream(outputStream.toByteArray())));
+    }
+
+
+    public ResponseEntity<Resource> exportToCSVEnhanced() throws IOException {
+        // Create a temporary file
+        Path tempFile = Files.createTempFile("employee-", ".csv");
+
+        System.out.println("Temporary file location: "+tempFile.toString());
+
+        try (BufferedWriter writer = Files.newBufferedWriter(tempFile)) {
+            // Write CSV header
+            writer.write("ID,Name,Surname\n"); // Add newline after the header
+
+            // Query the database and write each row to the file
+            jdbcTemplate.query("SELECT emp_id, name, surname FROM employee", rs -> {
+                while (rs.next()) {
+                    long id = rs.getLong("emp_id");
+                    String name = rs.getString("name");
+                    String surname = rs.getString("surname");
+
+                    // Write each record as a CSV row
+                    try {
+                        writer.write(String.format("%d,%s,%s%n", id, name, surname));
+                    } catch (IOException e) {
+                        throw new RuntimeException("Error writing to CSV file", e);
+                    }
+                }
+            });
+        }
+
+        String headerValue = "attachment;" + "filename=employees_"+System.currentTimeMillis()+".csv";
+        // Convert the temporary file to a Resource
+        Resource resource = new UrlResource(tempFile.toUri());
+
+        // Prepare the response with the file as an attachment
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, headerValue)
+                .contentType(MediaType.parseMediaType("text/csv"))
+                .body(resource);
+    }
+
 }
