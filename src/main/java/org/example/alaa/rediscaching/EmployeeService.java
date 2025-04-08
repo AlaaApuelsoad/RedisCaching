@@ -146,23 +146,20 @@ public class EmployeeService {
 
 
     public ResponseEntity<Resource> exportToCSVEnhanced() throws IOException {
-        // Create a temporary file
+
         Path tempFile = Files.createTempFile("employee-", ".csv");
 
         System.out.println("Temporary file location: "+tempFile.toString());
 
         try (BufferedWriter writer = Files.newBufferedWriter(tempFile)) {
-            // Write CSV header
-            writer.write("ID,Name,Surname\n"); // Add newline after the header
+            writer.write("ID,Name,Surname\n");
 
-            // Query the database and write each row to the file
             jdbcTemplate.query("SELECT emp_id, name, surname FROM employee", rs -> {
                 while (rs.next()) {
                     long id = rs.getLong("emp_id");
                     String name = rs.getString("name");
                     String surname = rs.getString("surname");
 
-                    // Write each record as a CSV row
                     try {
                         writer.write(String.format("%d,%s,%s%n", id, name, surname));
                     } catch (IOException e) {
@@ -173,10 +170,9 @@ public class EmployeeService {
         }
 
         String headerValue = "attachment;" + "filename=employees_"+System.currentTimeMillis()+".csv";
-        // Convert the temporary file to a Resource
+
         Resource resource = new UrlResource(tempFile.toUri());
 
-        // Prepare the response with the file as an attachment
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, headerValue)
                 .contentType(MediaType.parseMediaType("text/csv"))
